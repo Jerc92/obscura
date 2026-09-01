@@ -252,10 +252,7 @@ pub fn spawn_watchdog(handle: IsolateHandle, budget: std::time::Duration) -> Wat
 }
 
 impl WatchdogToken {
-    /// Stop the watchdog. Returns true if it had already fired (terminated the
-    /// isolate). The caller must then clear the termination flag via
-    /// [`ObscuraJsRuntime::cancel_termination`] before the next eval.
-    pub fn stop(mut self) -> bool {
+    fn cancel_and_join(&mut self) {
         {
             let (lock, cvar) = &*self.pair;
             *lock.lock().unwrap() = true;
@@ -264,7 +261,23 @@ impl WatchdogToken {
         if let Some(j) = self.join.take() {
             let _ = j.join();
         }
+    }
+
+    /// Stop the watchdog. Returns true if it had already fired (terminated the
+    /// isolate). The caller must then clear the termination flag via
+    /// [`ObscuraJsRuntime::cancel_termination`] before the next eval.
+    pub fn stop(mut self) -> bool {
+        self.cancel_and_join();
         self.fired.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl Drop for WatchdogToken {
+    fn drop(&mut self) {
+        // Futures which own a watchdog may be cancelled while parked on I/O.
+        // Dropping the token must not leave a detached thread which later
+        // terminates an isolate that has already moved on to another task.
+        self.cancel_and_join();
     }
 }
 
@@ -2482,7 +2495,8 @@ impl ObscuraJsRuntime {
     }
 
     /// Whether a connected dynamic script prepared before the document load
-    /// event still has fetch/evaluation/load-or-error work outstanding.
+    /// event still has work outstanding, or the queued document load task has
+    /// not completed its task-end microtask checkpoint yet.
     ///
     /// This intentionally excludes `import()` and scripts created by a load
     /// handler. Those are ordinary post-load enhancement work and should only
@@ -5898,6 +5912,17 @@ mod tests {
             serde_json::json!("usable"),
             "the per-turn watchdog must leave the isolate reusable",
         );
+    }
+
+    #[test]
+    fn dropping_a_cancelled_watchdog_cannot_terminate_later_work() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        {
+            let _cancelled = rt.arm_watchdog(std::time::Duration::from_millis(20));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(40));
+
+        assert_eq!(rt.evaluate("1 + 1").unwrap(), serde_json::json!(2.0));
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -17548,5 +17573,3 @@ mod tests {
         );
     }
 }
-
-
