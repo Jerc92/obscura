@@ -207,22 +207,7 @@ pub async fn handle(
                 .get("targetId")
                 .and_then(|v| v.as_str())
                 .ok_or("targetId required")?;
-            let session_id = format!("{}-session", target_id);
-
-            ctx.pending_events.push(CdpEvent::new(
-                "Target.detachedFromTarget",
-                json!({
-                    "sessionId": session_id,
-                    "targetId": target_id,
-                }),
-            ));
-            ctx.pending_events.push(CdpEvent::new(
-                "Target.targetDestroyed",
-                json!({ "targetId": target_id }),
-            ));
-
-            ctx.remove_page(target_id);
-            Ok(json!({ "success": true }))
+            Ok(json!({ "success": ctx.destroy_target(target_id) }))
         }
         "setAutoAttach" => Ok(json!({})),
         // No multi-target lifecycle to manage: obscura runs one page per session.
@@ -271,28 +256,7 @@ pub async fn handle(
                 .get("browserContextId")
                 .and_then(|v| v.as_str())
                 .ok_or("browserContextId required")?;
-            let sessions: Vec<(String, String)> = ctx
-                .sessions
-                .iter()
-                .filter_map(|(session_id, page_id)| {
-                    ctx.get_page(page_id)
-                        .filter(|page| page.context.id == context_id)
-                        .map(|_| (session_id.clone(), page_id.clone()))
-                })
-                .collect();
-            let page_ids = ctx.dispose_browser_context(context_id)?;
-            for (session_id, page_id) in sessions {
-                ctx.pending_events.push(CdpEvent::new(
-                    "Target.detachedFromTarget",
-                    json!({ "sessionId": session_id, "targetId": page_id }),
-                ));
-            }
-            for page_id in page_ids {
-                ctx.pending_events.push(CdpEvent::new(
-                    "Target.targetDestroyed",
-                    json!({ "targetId": page_id }),
-                ));
-            }
+            ctx.destroy_browser_context(context_id, None)?;
             Ok(json!({}))
         }
         "getTargetInfo" => {

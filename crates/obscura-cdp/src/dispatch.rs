@@ -282,7 +282,6 @@ impl CdpContext {
         if self.browser_contexts.remove(id).is_none() {
             return Err(format!("Browser context not found: {}", id));
         }
-
         let page_ids: Vec<String> = self
             .pages
             .iter()
@@ -336,6 +335,81 @@ impl CdpContext {
             self.runtime_enabled_sessions.remove(session_id);
         }
         self.sessions.retain(|_, v| v != id);
+    }
+
+    /// Destroy a target through the single ownership-cleanup path used by both
+    /// ordinary Target commands and navigation cancellation. A task-owned page
+    /// is temporarily absent from `pages`, but its sessions still identify it.
+    pub(crate) fn destroy_target(&mut self, id: &str) -> bool {
+        let removed_sessions: Vec<String> = self
+            .sessions
+            .iter()
+            .filter(|(_, page_id)| page_id.as_str() == id)
+            .map(|(session_id, _)| session_id.clone())
+            .collect();
+        let existed = !removed_sessions.is_empty() || self.pages.iter().any(|page| page.id == id);
+        if !existed {
+            return false;
+        }
+        for session_id in &removed_sessions {
+            self.pending_events.push(CdpEvent::new(
+                "Target.detachedFromTarget",
+                json!({"sessionId": session_id, "targetId": id}),
+            ));
+        }
+        self.pending_events.push(CdpEvent::new(
+            "Target.targetDestroyed",
+            json!({"targetId": id}),
+        ));
+        self.remove_page(id);
+        true
+    }
+
+    /// Dispose a context, including a page currently owned by an in-flight
+    /// navigation task and therefore absent from `pages`.
+    pub(crate) fn destroy_browser_context(
+        &mut self,
+        id: &str,
+        task_owned_page: Option<&str>,
+    ) -> Result<(), String> {
+        let mut page_ids: Vec<String> = self
+            .pages
+            .iter()
+            .filter(|page| page.context.id == id)
+            .map(|page| page.id.clone())
+            .collect();
+        if let Some(page_id) = task_owned_page {
+            if self.pages.iter().any(|page| page.id == page_id)
+                || self.sessions.values().any(|owner| owner == page_id)
+            {
+                page_ids.push(page_id.to_string());
+            }
+        }
+        page_ids.sort_unstable();
+        page_ids.dedup();
+        let removed_sessions: Vec<(String, String)> = self
+            .sessions
+            .iter()
+            .filter(|(_, owner)| page_ids.contains(owner))
+            .map(|(session, owner)| (session.clone(), owner.clone()))
+            .collect();
+        self.dispose_browser_context(id)?;
+        if let Some(page_id) = task_owned_page {
+            self.remove_page(page_id);
+        }
+        for (session_id, page_id) in removed_sessions {
+            self.pending_events.push(CdpEvent::new(
+                "Target.detachedFromTarget",
+                json!({"sessionId": session_id, "targetId": page_id}),
+            ));
+        }
+        for page_id in page_ids {
+            self.pending_events.push(CdpEvent::new(
+                "Target.targetDestroyed",
+                json!({"targetId": page_id}),
+            ));
+        }
+        Ok(())
     }
 
     #[cfg(feature = "render")]
