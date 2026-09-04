@@ -1986,7 +1986,7 @@ impl ObscuraJsRuntime {
         );
         if !return_by_value {
             self.evaluation_recipes
-                .insert(oid.clone(), cleaned_expr.to_string());
+                .insert(oid.clone(), expression.to_string());
         }
 
         if return_by_value {
@@ -2415,7 +2415,7 @@ impl ObscuraJsRuntime {
                 let message = panic_payload_message(payload.as_ref());
                 let outcome = if message.contains("Module already evaluated") {
                     self
-                        .runtime
+                        .runtime()
                         .get_module_namespace(module_id)
                         .map(|_| ())
                         .map_err(|error| format!("{} eval error: {}", what, error))
@@ -2443,7 +2443,7 @@ impl ObscuraJsRuntime {
 
         let outcome = match outcome {
             Ok(Ok(())) => self
-                .runtime
+                .runtime()
                 .get_module_namespace(module_id)
                 .map(|_| ())
                 .map_err(|error| format!("{} eval error: {}", what, error)),
