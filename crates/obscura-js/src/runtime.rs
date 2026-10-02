@@ -15534,7 +15534,7 @@ mod tests {
         rt.run_page_init();
         let result = rt.execute_runtime_script(
             "<no-tokio-image>",
-            "Deno.core.ops.op_load_image_metadata(document.getElementById('image')._nid);"
+            "__obscura_test_ops.op_load_image_metadata(document.getElementById('image')._nid);"
                 .to_string(),
         );
         assert!(
@@ -15783,7 +15783,7 @@ mod tests {
                 globalThis.__reactionLoaded = 0;
                 globalThis.__reactionErrors = 0;
                 globalThis.__reactionBadDimensions = 0;
-                Deno.core.ops.op_sleep(0).then(() => {{
+                __obscura_test_ops.op_sleep(0).then(() => {{
                     for (let i = 0; i < 64; i++) {{
                         const image = document.createElement("img");
                         image.addEventListener("load", () => {{

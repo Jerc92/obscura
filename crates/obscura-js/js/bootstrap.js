@@ -6496,7 +6496,7 @@ function _imageEncodingError() {
 // state and event timing.
 Object.defineProperty(globalThis, '__obscura_applyImageCompletion', {
   value: function(nid, completionId) {
-    return Deno.core.ops.op_finish_image_metadata(nid >>> 0, String(completionId));
+    return __obscuraCore.ops.op_finish_image_metadata(nid >>> 0, String(completionId));
   },
   writable: false,
   enumerable: false,
