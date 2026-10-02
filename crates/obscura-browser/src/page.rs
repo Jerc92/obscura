@@ -8103,11 +8103,13 @@ mod tests {
         runtime.set_dom(dom);
         runtime.set_url(&page_url);
         runtime.set_viewport(100.0, 80.0);
-        runtime.run_page_init();
         page.js = Some(runtime);
         page.url = Some(url::Url::parse(&page_url).unwrap());
 
         assert_eq!(page.prepare_screenshot_resources(1_000).await, 1);
+        // Keep the initial parser image load behind page-transport preparation.
+        // A hostless runtime can already load it synchronously during init.
+        page.js.as_mut().unwrap().run_page_init();
         assert_eq!(
             page.js
                 .as_mut()
