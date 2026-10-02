@@ -3143,6 +3143,7 @@ mod tests {
     };
     #[cfg(feature = "render")]
     use super::pump_and_forward_screencast_frames;
+    use crate::dispatch::CdpContext;
     use obscura_net::{CookieInfo, CookieJar};
     use serde_json::json;
     use std::collections::{HashMap, VecDeque};
@@ -3174,6 +3175,7 @@ mod tests {
         let mut queued = VecDeque::from([
             obscura_js::ops::InterceptedRequest {
                 owner_page_id: "page-a".to_string(),
+                page_id: "page-a".to_string(),
                 request_id: "a-queued".to_string(),
                 url: "https://example.com/a".to_string(),
                 method: "GET".to_string(),
@@ -3183,6 +3185,7 @@ mod tests {
             },
             obscura_js::ops::InterceptedRequest {
                 owner_page_id: "page-b".to_string(),
+                page_id: "page-b".to_string(),
                 request_id: "b-queued".to_string(),
                 url: "https://example.com/b".to_string(),
                 method: "GET".to_string(),
@@ -4032,6 +4035,7 @@ mod tests {
                     server_rx,
                     default_context,
                     shutdown,
+                    std::sync::Arc::new(ConnectionControl::new()),
                 ));
 
                 server_tx
@@ -4197,7 +4201,9 @@ mod tests {
                 "id":1, "method":"Page.navigate", "sessionId":session,
                 "params":{"url":"data:text/html,<body style='background:rgb(0,0,255)'>", "waitUntil":"load"}
             }).to_string(), &mut ctx, &reply_tx, &mut server_rx,
-                &mut intercept_rx, &mut paused, &mut deferred, true).await;
+                &mut intercept_rx, &mut VecDeque::new(), &mut paused, &mut deferred,
+                &mut VecDeque::new(), true,
+                &std::sync::Arc::new(ConnectionControl::new())).await;
             let mut events = Vec::new();
             while let Ok(text) = reply_rx.try_recv() {
                 events.push(serde_json::from_str::<serde_json::Value>(&text).unwrap());
@@ -4226,6 +4232,7 @@ mod tests {
             let context = crate::dispatch::CdpContext::new().default_context;
             let processor = tokio::task::spawn_local(super::cdp_processor(
                 server_rx, context, std::sync::Arc::new(tokio::sync::Notify::new()),
+                std::sync::Arc::new(ConnectionControl::new()),
             ));
             server_tx.send(super::ServerMessage::NewConnection {
                 reply_tx: reply_tx.clone(),
@@ -4324,6 +4331,7 @@ mod tests {
             let context = CdpContext::new().default_context;
             let processor = tokio::task::spawn_local(cdp_processor(
                 server_rx, context, std::sync::Arc::new(tokio::sync::Notify::new()),
+                std::sync::Arc::new(ConnectionControl::new()),
             ));
             server_tx.send(ServerMessage::NewConnection { reply_tx: reply_tx.clone() }).unwrap();
             reply_rx.recv().await.unwrap();
@@ -4399,6 +4407,7 @@ mod tests {
             let context = crate::dispatch::CdpContext::new().default_context;
             let processor = tokio::task::spawn_local(super::cdp_processor(
                 server_rx, context, std::sync::Arc::new(tokio::sync::Notify::new()),
+                std::sync::Arc::new(ConnectionControl::new()),
             ));
             server_tx.send(super::ServerMessage::NewConnection { reply_tx: reply_tx.clone() }).unwrap();
             reply_rx.recv().await.unwrap();
