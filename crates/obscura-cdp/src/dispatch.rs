@@ -517,12 +517,13 @@ impl CdpContext {
     /// ordinary Target commands and navigation cancellation. A task-owned page
     /// is temporarily absent from `pages`, but its sessions still identify it.
     pub(crate) fn destroy_target(&mut self, id: &str) -> bool {
-        let removed_sessions: Vec<String> = self
+        let mut removed_sessions: Vec<String> = self
             .sessions
             .iter()
             .filter(|(_, page_id)| page_id.as_str() == id)
             .map(|(session_id, _)| session_id.clone())
             .collect();
+        removed_sessions.sort_unstable();
         let existed = !removed_sessions.is_empty() || self.pages.iter().any(|page| page.id == id);
         if !existed {
             return false;
