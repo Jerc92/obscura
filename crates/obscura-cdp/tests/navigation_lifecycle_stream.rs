@@ -971,7 +971,7 @@ async fn domcontentloaded_returns_before_a_load_delaying_script() {
             );
             assert_eq!(
                 other_target_response.unwrap()["result"]["result"]["value"],
-                json!(51),
+                json!(51.0),
             );
             send(&mut ws, json!({
                 "id": 60,
@@ -1017,7 +1017,7 @@ async fn domcontentloaded_returns_before_a_load_delaying_script() {
                     resumed = Some(message);
                 }
             }
-            assert_eq!(resumed.unwrap()["result"]["result"]["value"], json!(2));
+            assert_eq!(resumed.unwrap()["result"]["result"]["value"], json!(2.0));
             send(&mut ws, json!({
                 "id": 62,
                 "method": "Runtime.evaluate",
@@ -1036,7 +1036,7 @@ async fn domcontentloaded_returns_before_a_load_delaying_script() {
                 after_close_started.elapsed() < Duration::from_secs(2),
                 "closing the lifecycle owner stranded another target",
             );
-            assert_eq!(after_close["result"]["result"]["value"], json!(3));
+            assert_eq!(after_close["result"]["result"]["value"], json!(3.0));
             send(&mut ws, json!({
                 "id": 8,
                 "method": "Target.closeTarget",
@@ -1242,7 +1242,7 @@ async fn disposing_context_during_load_releases_deferred_target() {
                 destroyed |= message["method"] == "Target.targetDestroyed"
                     && message["params"]["targetId"].as_str() == Some(owned_target.as_str());
             }
-            assert_eq!(resumed.unwrap()["result"]["result"]["value"], json!(7));
+            assert_eq!(resumed.unwrap()["result"]["result"]["value"], json!(7.0));
             let _ = ws.close(None).await;
         })
         .await;
@@ -1308,7 +1308,7 @@ async fn post_load_drain_releases_other_target_at_absolute_bound() {
                 drain_elapsed < Duration::from_secs(2),
                 "post-load drain exceeded its absolute bound: {drain_elapsed:?}",
             );
-            assert_eq!(resumed["result"]["result"]["value"], json!(6));
+            assert_eq!(resumed["result"]["result"]["value"], json!(6.0));
 
             send(&mut ws, json!({
                 "id": 7,
@@ -1322,7 +1322,7 @@ async fn post_load_drain_releases_other_target_at_absolute_bound() {
                     break message;
                 }
             };
-            assert_eq!(owner_resumed["result"]["result"]["value"], json!(7));
+            assert_eq!(owner_resumed["result"]["result"]["value"], json!(7.0));
             send(&mut ws, json!({
                 "id": 8,
                 "method": "Target.closeTarget",

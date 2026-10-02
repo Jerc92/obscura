@@ -2184,7 +2184,11 @@ fn take_live_pending_navigation(
         let session_id = ctx
             .navigation_sessions
             .get(&page.id)
-            .and_then(Clone::clone)?;
+            .and_then(Clone::clone)
+            .filter(|session_id| ctx.sessions.get(session_id) == Some(&page.id))
+            .or_else(|| ctx.sessions.iter()
+                .find(|(_, owner)| *owner == &page.id)
+                .map(|(session_id, _)| session_id.clone()))?;
         let (url, method, body) = page.take_pending_navigation()?;
         Some((session_id, url, method, body))
     })
