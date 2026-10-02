@@ -2329,6 +2329,7 @@ mod tests {
         let session_id = Some(format!("{page_id}-session"));
         ctx.sessions
             .insert(session_id.clone().unwrap(), page_id.clone());
+        ctx.page_enabled_sessions.insert(session_id.clone().unwrap());
         ctx.fetch_intercept.enabled = true;
         let page_url = "https://example.test/";
         let event = obscura_browser::NetworkEvent {

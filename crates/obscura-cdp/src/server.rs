@@ -2614,6 +2614,7 @@ mod tests {
                     }
                 }
                 let session_id = session_id.expect("attached page session");
+                send(json!({"id": 900, "method": "Page.enable", "sessionId": session_id, "params": {}}));
 
                 send(json!({
                     "id": 2,
@@ -2745,6 +2746,7 @@ mod tests {
                     }
                 }
                 let session_id = session_id.expect("attached page session");
+                send(json!({"id": 900, "method": "Page.enable", "sessionId": session_id, "params": {}}));
 
                 send(json!({
                     "id": 2,
@@ -2850,6 +2852,7 @@ mod tests {
             let page_id = ctx.create_page();
             let session = Some(format!("{page_id}-session"));
             ctx.sessions.insert(session.clone().unwrap(), page_id);
+            crate::domains::page::handle("enable", &json!({}), &mut ctx, &session).await.unwrap();
             crate::domains::page::handle("navigate", &json!({
                 "url":"data:text/html,<body style='background:white'>", "waitUntil":"load"
             }), &mut ctx, &session).await.unwrap();
@@ -2919,6 +2922,7 @@ mod tests {
                 if value["id"] == 1 { break; }
             }
             let session = session.expect("attached session");
+                send(json!({"id": 900, "method": "Page.enable", "sessionId": session, "params": {}}));
             send(json!({"id": 2, "method": "Fetch.enable", "sessionId": session,
                 "params": {"patterns": [{"urlPattern": "http://127.0.0.1:9/*"}]}}));
             loop {
@@ -3013,6 +3017,7 @@ mod tests {
                 if value["id"] == 1 { break; }
             }
             let session = session.expect("attached session");
+                send(json!({"id": 900, "method": "Network.enable", "sessionId": session, "params": {}}));
             send(json!({"id": 2, "method": "Fetch.enable", "sessionId": session,
                 "params": {"patterns": [{"urlPattern": "http://127.0.0.1:9/*"}]}}));
             loop {
