@@ -1093,71 +1093,14 @@ fn run_connection(
                     return;
                 }
             };
-            // Socket I/O must not share the renderer's LocalSet: a synchronous
-            // V8/layout task otherwise delays even replies already queued by a
-            // completed navigation. Keep all page/isolate work on this thread,
-            // and move only Send protocol strings and the socket to an I/O thread.
-            let (msg_tx, msg_rx) = mpsc::unbounded_channel::<ServerMessage>();
-            let (io_stop_tx, io_stop_rx) = tokio::sync::oneshot::channel::<()>();
-            let (io_done_tx, io_done_rx) = tokio::sync::oneshot::channel::<()>();
-            let io_thread = match std::thread::Builder::new()
-                .name("obscura-cdp-io".into())
-                .spawn(move || {
-                    // Dropping this sender also signals early setup failures.
-                    let _io_done = io_done_tx;
-                    let io_rt = match tokio::runtime::Builder::new_current_thread()
-                        .enable_all().build()
-                    {
-                        Ok(runtime) => runtime,
-                        Err(error) => {
-                            error!("connection I/O runtime build failed: {error}");
-                            return;
-                        }
-                    };
-                    let io_local = tokio::task::LocalSet::new();
-                    io_local.block_on(&io_rt, async move {
-                        let stream = match TcpStream::from_std(std_stream) {
-                            Ok(stream) => stream,
-                            Err(error) => {
-                                error!("TcpStream::from_std failed: {error}");
-                                return;
-                            }
-                        };
-                        tokio::select! {
-                            result = handle_connection_ws(stream, msg_tx) => {
-                                if let Err(error) = result {
-                                    error!("WebSocket connection error: {error}");
-                                }
-                            }
-                            _ = io_stop_rx => {}
-                        }
-                    });
-                })
-            {
-                Ok(thread) => thread,
-                Err(error) => {
-                    error!("connection I/O thread spawn failed: {error}");
-                    return;
-                }
-            };
             let local = tokio::task::LocalSet::new();
             local.block_on(&rt, async move {
-                // Run the processor in the connection future. A self-waking
-                // LocalSet task can run 61 times before Tokio services I/O,
-                // starving fetch under a continuously ready page scheduler.
-                let processor = cdp_processor(
+                // Socket I/O runs on the server runtime. Keep the processor in
+                // this connection future so ready local tasks cannot starve it.
+                cdp_processor(
                     msg_rx, default_context, shutdown_notify, connection_control,
-                );
-                tokio::pin!(processor);
-                tokio::select! {
-                    _ = &mut processor => {}
-                    // Dropping the processor cancels an in-flight command.
-                    // Detached navigation tasks are dropped with the LocalSet.
-                    _ = io_done_rx => {}
-                }
+                ).await;
             });
-            let _ = io_stop_tx.send(());
-            let _ = io_thread.join();
 
             // `LocalSet` owns any detached local navigation tasks, and the
             // runtime owns their scheduler allocations. Drop both before the
@@ -3549,8 +3492,14 @@ mod tests {
             let (stream, _) = listener.accept().await.unwrap();
             stream.set_nodelay(true).unwrap();
             let context = crate::dispatch::CdpContext::new().default_context;
-            super::run_connection(stream.into_std().unwrap(), context.clone(), context,
-                Arc::new(std::sync::Mutex::new(())), Arc::new(tokio::sync::Notify::new()), live_server);
+            let (msg_tx, msg_rx) = tokio::sync::mpsc::unbounded_channel();
+            let control = Arc::new(super::ConnectionControl::new());
+            let shutdown = Arc::new(tokio::sync::Notify::new());
+            assert!(super::run_connection(msg_rx, context.clone(), context,
+                Arc::new(std::sync::Mutex::new(())), shutdown.clone(), live_server,
+                control.clone()));
+            tokio::spawn(super::handle_connection_ws(stream, msg_tx, control, shutdown,
+                Arc::new(std::sync::atomic::AtomicBool::new(false))));
         });
         let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{address}/devtools/browser")).await.unwrap();
         accept.await.unwrap();
@@ -3619,8 +3568,14 @@ mod tests {
             let (stream, _) = listener.accept().await.unwrap();
             stream.set_nodelay(true).unwrap();
             let context = crate::dispatch::CdpContext::new().default_context;
-            super::run_connection(stream.into_std().unwrap(), context.clone(), context,
-                Arc::new(std::sync::Mutex::new(())), Arc::new(tokio::sync::Notify::new()), live_server);
+            let (msg_tx, msg_rx) = tokio::sync::mpsc::unbounded_channel();
+            let control = Arc::new(super::ConnectionControl::new());
+            let shutdown = Arc::new(tokio::sync::Notify::new());
+            assert!(super::run_connection(msg_rx, context.clone(), context,
+                Arc::new(std::sync::Mutex::new(())), shutdown.clone(), live_server,
+                control.clone()));
+            tokio::spawn(super::handle_connection_ws(stream, msg_tx, control, shutdown,
+                Arc::new(std::sync::atomic::AtomicBool::new(false))));
         });
         let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{address}/devtools/browser")).await.unwrap();
         accept.await.unwrap();
