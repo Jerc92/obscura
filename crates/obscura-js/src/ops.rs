@@ -684,7 +684,6 @@ pub struct ObscuraState {
     pub(crate) async_image_loads: Arc<AsyncImageLoadState>,
     #[cfg(feature = "render")]
     pub(crate) async_image_jobs: AsyncImageJobOwner,
-    #[cfg(feature = "render")]
     /// Page-transport loads for resources that cache-only layout or paint
     /// missed. The owning page fetches them and sends the outcome here; the
     /// runtime applies results at its own event-loop turns and at every
