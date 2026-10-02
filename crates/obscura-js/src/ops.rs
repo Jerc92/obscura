@@ -7859,7 +7859,7 @@ fn cached_image_metadata_for_node(gs: &ObscuraState, node_id: NodeId) -> String 
 #[op2]
 #[string]
 fn op_image_metadata(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     state: &OpState,
     nid: u32,
     _cached_only: bool,
@@ -7947,7 +7947,7 @@ fn finish_async_image_metadata(
 #[op2]
 #[string]
 fn op_finish_image_metadata(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     state: &OpState,
     nid: u32,
     #[string] completion_id: &str,
@@ -8153,7 +8153,7 @@ async fn run_prepared_image_load(
 
 #[cfg(feature = "render")]
 fn deliver_image_result(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     request_id: u32,
     nid: u32,
     completion_id: u64,
@@ -8168,7 +8168,7 @@ fn deliver_image_result(
         return false;
     };
     let scope = &mut v8::ContextScope::new(scope, origin_context);
-    let scope = &mut v8::TryCatch::new(scope);
+    v8::tc_scope!(let scope, scope);
     let global = origin_context.global(scope);
     let Some(callback_name) = v8::String::new(scope, "__obscura_applyImageCompletion") else {
         return false;
@@ -8372,8 +8372,8 @@ fn schedule_image_job(
 /// and hostless results remain synchronous and do not require Tokio.
 #[cfg(feature = "render")]
 #[op2]
-fn op_load_image_metadata<'s>(
-    scope: &'s mut v8::HandleScope,
+fn op_load_image_metadata<'s, 'i>(
+    scope: &mut v8::PinScope<'s, 'i>,
     state: Rc<RefCell<OpState>>,
     nid: u32,
 ) -> Result<v8::Local<'s, v8::Promise>, deno_error::JsErrorBox> {
