@@ -8094,13 +8094,12 @@ mod tests {
         );
         page.execute_scripts_until_dom_content_loaded(None).await;
 
-        for _ in 0..8 {
-            page.run_autonomous_event_loop_turn().await.unwrap();
-            if page.lifecycle == super::LifecycleState::Loaded {
-                break;
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while page.lifecycle != super::LifecycleState::Loaded {
+                page.run_autonomous_event_loop_turn().await.unwrap();
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
             }
-            tokio::task::yield_now().await;
-        }
+        }).await.expect("page-local error stranded document load");
 
         assert_eq!(page.lifecycle, super::LifecycleState::Loaded);
         assert_eq!(

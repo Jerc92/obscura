@@ -1796,8 +1796,7 @@ async fn cdp_processor(
                         .as_ref()
                         .map(|_| tokio::time::Instant::now() + FIRST_LIFECYCLE_PUMP_GRACE);
                     lifecycle_release_deadline = None;
-                } else if ctx.pages.iter().any(|page| page.intercept_enabled)
-                    && serde_json::from_str::<CdpRequest>(&cdp_msg.text).is_ok_and(|req| {
+                } else if serde_json::from_str::<CdpRequest>(&cdp_msg.text).is_ok_and(|req| {
                         matches!(req.method.as_str(), "Runtime.evaluate" | "Runtime.callFunctionOn")
                             && req.params.get("awaitPromise").and_then(|v| v.as_bool()) == Some(true)
                     })
@@ -1805,6 +1804,7 @@ async fn cdp_processor(
                     process_awaited_with_interception(
                         &cdp_msg.text, &mut ctx, &cdp_msg.reply_tx, &mut rx,
                         &mut intercept_rx, &mut intercepted_paused, &mut deferred,
+                        &connection_control,
                     ).await;
                 } else {
                     if let Some((destroyed_pages, disposed_context)) =
@@ -2337,10 +2337,9 @@ fn handle_fetch_resolution(
             }
             return true;
         }
-        // Internal JS fetch interceptions have owner/generation-qualified IDs.
-        // Once their owner is replaced or destroyed, do not let the legacy
-        // static Fetch handler acknowledge the stale ID as if it still existed.
-        if request_id.contains(":intercept-") {
+        // Internal JS fetch IDs are globally unique across runtime generations.
+        // A missing live owner must not fall through to the static Fetch handler.
+        if request_id.starts_with("fetch-") {
             let response = crate::types::CdpResponse::error(
                 req.id,
                 -32000,
@@ -2855,6 +2854,7 @@ async fn process_awaited_with_interception(
     intercept_rx: &mut Option<mpsc::UnboundedReceiver<obscura_js::ops::InterceptedRequest>>,
     intercepted_paused: &mut HashMap<String, PausedInterception>,
     deferred: &mut std::collections::VecDeque<ServerMessage>,
+    connection_control: &Arc<ConnectionControl>,
 ) {
     // The evaluation owns ctx (and V8) until it completes. Snapshot only routing
     // metadata so request replies can unblock it without entering another isolate.
@@ -2869,6 +2869,7 @@ async fn process_awaited_with_interception(
     loop {
         tokio::select! {
             () = &mut command => break,
+            _ = connection_control.ended() => break,
             Some(intercepted) = async {
                 match intercept_rx.as_mut() {
                     Some(receiver) => receiver.recv().await,
@@ -2879,7 +2880,11 @@ async fn process_awaited_with_interception(
                     .map(|(frame_id, session_id)| (frame_id.as_str(), Some(session_id.clone())));
                 emit_routed_intercepted_request(intercepted, route, reply_tx, intercepted_paused);
             }
-            Some(message) = rx.recv() => {
+            message = rx.recv() => {
+                let Some(message) = message else {
+                    connection_control.signal_end(ConnectionEnd::Closed);
+                    break;
+                };
                 if let ServerMessage::Cdp(msg) = &message {
                     if handle_fetch_resolution(&msg.text, &mut resolution_context, &msg.reply_tx, intercepted_paused) {
                         continue;
@@ -4076,6 +4081,7 @@ mod tests {
                     }
                 }
                 let session_id = session_id.expect("attached page session");
+                send(json!({"id": 100, "method": "Page.enable", "sessionId": session_id}));
 
                 send(json!({
                     "id": 2,
@@ -4180,7 +4186,8 @@ mod tests {
             let mut ctx = crate::dispatch::CdpContext::new();
             let page_id = ctx.create_page();
             let session = Some(format!("{page_id}-session"));
-            ctx.sessions.insert(session.clone().unwrap(), page_id);
+            ctx.sessions.insert(session.clone().unwrap(), page_id.clone());
+            crate::domains::page::handle("enable", &json!({}), &mut ctx, &session).await.unwrap();
             crate::domains::page::handle("navigate", &json!({
                 "url":"data:text/html,<body style='background:white'>", "waitUntil":"load"
             }), &mut ctx, &session).await.unwrap();
@@ -4204,6 +4211,13 @@ mod tests {
                 &mut intercept_rx, &mut VecDeque::new(), &mut paused, &mut deferred,
                 &mut VecDeque::new(), true,
                 &std::sync::Arc::new(ConnectionControl::new())).await;
+            tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                while ctx.get_page(&page_id).unwrap().lifecycle != obscura_browser::lifecycle::LifecycleState::Loaded {
+                    ctx.get_page_mut(&page_id).unwrap().run_autonomous_event_loop_turn().await.unwrap();
+                }
+            }).await.unwrap();
+            super::sync_live_page_lifecycle_events(&mut ctx, Some(&page_id));
+            super::forward_pending_events(&mut ctx, Some(&reply_tx));
             let mut events = Vec::new();
             while let Ok(text) = reply_rx.try_recv() {
                 events.push(serde_json::from_str::<serde_json::Value>(&text).unwrap());
