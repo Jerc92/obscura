@@ -1889,6 +1889,7 @@ async fn cdp_processor(
                     let fetch_was_resolved = cdp_msg.text.contains("Fetch.")
                         && handle_fetch_resolution(
                             &cdp_msg.text,
+                            &mut ctx,
                             &cdp_msg.reply_tx,
                             &mut intercepted_paused,
                         );
@@ -1908,6 +1909,7 @@ async fn cdp_processor(
             lifecycle_first_pump_not_before = None;
         }
 
+        idle_pages.clear();
         // Dispatch may have created a page or scheduled new asynchronous work.
         // A single live isolate is the connection's current active target; the
         // pump will park cheaply if its next task is a distant timer.
@@ -2759,7 +2761,7 @@ async fn process_with_interception(
                             // op inside the spawned nav task. No V8 enter on
                             // this side; the actual V8 work happens back on
                             // the nav task's thread.
-                            handle_fetch_resolution(&msg.text, &msg.reply_tx, intercepted_paused);
+                            handle_fetch_resolution(&msg.text, ctx, &msg.reply_tx, intercepted_paused);
                         } else {
                             // UNSAFE during nav: would route through dispatch,
                             // which can `suspend_js` other pages and trip the
@@ -4628,12 +4630,14 @@ mod tests {
         let (reply_tx, mut reply_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         assert!(!handle_fetch_resolution(
             r#"{"id":16,"method":"Network.getResponseBody","params":{"requestId":"request-1"}}"#,
+            &mut CdpContext::new(),
             &reply_tx,
             &mut paused,
         ));
         assert!(paused.contains_key("request-1"), "unrelated commands must not consume the resolver");
         assert!(handle_fetch_resolution(
             r#"{"id":17,"method":"Fetch.continueRequest","params":{"requestId":"request-1"}}"#,
+            &mut CdpContext::new(),
             &reply_tx,
             &mut paused,
         ));
@@ -4647,10 +4651,10 @@ mod tests {
         assert!(reply_rx.try_recv().is_err(), "must not emit a duplicate response");
 
         let (resolution_tx, mut resolution_rx) = tokio::sync::oneshot::channel();
-        paused.insert("request-2".into(), resolution_tx);
+        paused.insert("request-2".into(), PausedInterception { page_id: "page-1".into(), resolver: resolution_tx });
         assert!(handle_fetch_resolution(
             r#"{"id":18,"method":"Fetch.failRequest","sessionId":"page-session","params":{"requestId":"request-2","errorReason":"Aborted"}}"#,
-            &reply_tx, &mut paused,
+            &mut CdpContext::new(), &reply_tx, &mut paused,
         ));
         assert!(matches!(resolution_rx.try_recv(), Ok(obscura_js::ops::InterceptResolution::Fail { reason }) if reason == "Aborted"));
         let event: serde_json::Value = serde_json::from_str(&reply_rx.try_recv().unwrap()).unwrap();

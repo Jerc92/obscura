@@ -3452,9 +3452,25 @@ impl Page {
             }
         } else {
             match self.js.as_mut() {
-                Some(js) => js.run_autonomous_event_loop_turn().await,
-                None => Ok(true),
-            }?
+                Some(js) => {
+                    #[cfg(feature = "render")]
+                    {
+                        let notify = js.render_resource_notify();
+                        let notified = notify.notified();
+                        tokio::pin!(notified);
+                        notified.as_mut().enable();
+                        let loads_pending = js.has_pending_render_resources();
+                        tokio::select! {
+                            biased;
+                            turn = js.run_autonomous_event_loop_turn() => turn?,
+                            _ = &mut notified, if loads_pending => false,
+                        }
+                    }
+                    #[cfg(not(feature = "render"))]
+                    js.run_autonomous_event_loop_turn().await?
+                }
+                None => true,
+            }
         };
         // Dynamic iframe fetches finish on the page event loop, but their
         // realms must be built by Page between turns. Keep the autonomous CDP
@@ -3463,10 +3479,22 @@ impl Page {
         let frame_work = self.advance_frames().await;
         #[cfg(feature = "render")]
         self.queue_pending_render_resources();
-        Ok(reached_idle
-            && !completed_document_load
-            && !frame_work
-            && self.pending_document_load.is_none())
+        let idle = reached_idle && !completed_document_load && !frame_work
+            && self.pending_document_load.is_none();
+        #[cfg(feature = "render")]
+        if idle && self.js.is_some() {
+            let notify = self.js.as_ref().unwrap().render_resource_notify();
+            let notified = notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            self.queue_pending_render_resources();
+            if self.has_pending_render_resources() {
+                notified.await;
+                self.drain_render_resource_results();
+                return Ok(false);
+            }
+        }
+        Ok(idle)
     }
 
     async fn settle_runtime_for_duration(js: &mut ObscuraJsRuntime, duration_ms: u64) {
