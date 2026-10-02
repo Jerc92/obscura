@@ -2153,7 +2153,10 @@ function _eventTargetDispatch(target, event, dispatchTargetOverride = null) {
         }
       }
     }
-    return !dispatchState.defaultPrevented;
+    // Events created in a parent realm use that realm's Event prototype.
+    // Its preventDefault updates the event surface rather than this realm's
+    // private dispatch state, so retain cancellation across realm boundaries.
+    return !(dispatchState.defaultPrevented || event.defaultPrevented);
   } finally {
     try {
       const outermost = path[path.length - 1];
