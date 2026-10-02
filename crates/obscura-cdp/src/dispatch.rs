@@ -88,8 +88,6 @@ pub struct CdpContext {
     /// Sessions that called Runtime.enable. Console and exception events are
     /// page-scoped but only delivered to these subscribers.
     pub runtime_enabled_sessions: HashSet<String>,
-    /// Page.setLifecycleEventsEnabled subscriptions, independent of Runtime.
-    pub(crate) lifecycle_enabled_sessions: HashSet<String>,
     // Legacy direct-embedder configuration. Protocol-created worlds live only
     // in `page_isolated_worlds`, so this vector does not grow with page churn.
     pub isolated_worlds: Vec<String>,
@@ -198,7 +196,6 @@ impl CdpContext {
             lifecycle_enabled_sessions: HashSet::new(),
             network_enabled_sessions: HashSet::new(),
             runtime_enabled_sessions: HashSet::new(),
-            lifecycle_enabled_sessions: HashSet::new(),
             preload_counter: 0,
             fetch_intercept: FetchInterceptState::new(),
             intercept_tx: None,

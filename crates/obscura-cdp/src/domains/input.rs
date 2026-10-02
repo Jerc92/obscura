@@ -336,8 +336,7 @@ pub async fn handle(
                 } else {
                     None
                 };
-                if let Some((page_id, frame_id, url)) = moved_frame {
-                    let _ = page_id;
+                if let Some((frame_id, url)) = moved_frame {
                     crate::domains::page::emit_same_document_navigation(ctx, session_id, &frame_id, &url);
                 }
             } else if event_type == "mouseWheel" {
